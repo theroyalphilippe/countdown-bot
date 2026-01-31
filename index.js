@@ -11,41 +11,48 @@ const {
   createAudioResource,
   AudioPlayerStatus,
   entersState,
-  VoiceConnectionStatus,
+  VoiceConnectionStatus
 } = require("@discordjs/voice");
 
 const googleTTS = require("google-tts-api");
+
 const ffmpegPath = require("ffmpeg-static");
 process.env.FFMPEG_PATH = ffmpegPath;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates
+  ]
 });
 
 client.once("ready", () => {
   console.log("✅ Bot is online!");
 });
 
-client.on("interactionCreate", async (interaction) => {
+client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "countdown") return;
 
   const seconds = interaction.options.getInteger("seconds");
-  const voiceChannel = interaction.member?.voice?.channel;
+  const voiceChannel = interaction.member.voice.channel;
 
   if (!voiceChannel) {
-    return interaction.reply({ content: "❌ Join a voice channel first.", ephemeral: true });
+    return interaction.reply({
+      content: "❌ Join a voice channel first.",
+      ephemeral: true
+    });
   }
 
-  // 🔥 CRITICAL FIX: defer immediately
+  // 🔥 REQUIRED to avoid timeout
   await interaction.deferReply();
 
   try {
     await interaction.editReply(`⏱️ Countdown starting: ${seconds}s`);
     await playCountdown(voiceChannel, seconds);
   } catch (err) {
-    console.error("❌ Audio error:", err);
-    await interaction.editReply("❌ Something went wrong playing audio.");
+    console.error("❌ Countdown failed:", err);
+    await interaction.editReply("❌ Audio playback failed. Check Railway logs.");
   }
 });
 
@@ -54,7 +61,7 @@ async function playCountdown(voiceChannel, seconds) {
     channelId: voiceChannel.id,
     guildId: voiceChannel.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: false,
+    selfDeaf: false
   });
 
   await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
@@ -63,8 +70,15 @@ async function playCountdown(voiceChannel, seconds) {
   connection.subscribe(player);
 
   for (let i = seconds; i >= 1; i--) {
-    const url = googleTTS.getAudioUrl(String(i), { lang: "en", slow: false });
-    const filePath = path.join(process.cwd(), `tts_${i}_${Date.now()}.mp3`);
+    const url = googleTTS.getAudioUrl(String(i), {
+      lang: "en",
+      slow: false
+    });
+
+    const filePath = path.join(
+      process.cwd(),
+      `tts_${i}_${Date.now()}.mp3`
+    );
 
     const res = await fetch(url);
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -74,7 +88,9 @@ async function playCountdown(voiceChannel, seconds) {
     player.play(resource);
 
     await entersState(player, AudioPlayerStatus.Playing, 10_000);
-    await new Promise((r) => player.once(AudioPlayerStatus.Idle, r));
+    await new Promise(resolve =>
+      player.once(AudioPlayerStatus.Idle, resolve)
+    );
 
     fs.unlinkSync(filePath);
   }
