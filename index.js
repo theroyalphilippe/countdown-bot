@@ -1,6 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
   joinVoiceChannel,
@@ -12,8 +15,6 @@ const {
 } = require("@discordjs/voice");
 
 const googleTTS = require("google-tts-api");
-
-// Make sure ffmpeg is available on Railway
 const ffmpegPath = require("ffmpeg-static");
 process.env.FFMPEG_PATH = ffmpegPath;
 
@@ -33,19 +34,18 @@ client.on("interactionCreate", async (interaction) => {
   const voiceChannel = interaction.member?.voice?.channel;
 
   if (!voiceChannel) {
-    return interaction.reply("❌ Join a voice channel first.");
+    return interaction.reply({ content: "❌ Join a voice channel first.", ephemeral: true });
   }
 
-  await interaction.reply(`⏱️ Countdown starting: ${seconds}s`);
+  // 🔥 CRITICAL FIX: defer immediately
+  await interaction.deferReply();
 
   try {
+    await interaction.editReply(`⏱️ Countdown starting: ${seconds}s`);
     await playCountdown(voiceChannel, seconds);
   } catch (err) {
-    console.error("❌ Countdown error:", err);
-    // Don’t crash; just inform user
-    try {
-      await interaction.followUp("❌ Something went wrong playing audio. Check Railway Logs.");
-    } catch {}
+    console.error("❌ Audio error:", err);
+    await interaction.editReply("❌ Something went wrong playing audio.");
   }
 });
 
@@ -57,43 +57,29 @@ async function playCountdown(voiceChannel, seconds) {
     selfDeaf: false,
   });
 
-  connection.on("error", (e) => console.error("Voice connection error:", e));
-
   await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
 
   const player = createAudioPlayer();
-  player.on("error", (e) => console.error("Audio player error:", e));
   connection.subscribe(player);
 
-  // Small helper: download mp3 to a temp file
-  async function downloadToFile(url, filePath) {
+  for (let i = seconds; i >= 1; i--) {
+    const url = googleTTS.getAudioUrl(String(i), { lang: "en", slow: false });
+    const filePath = path.join(process.cwd(), `tts_${i}_${Date.now()}.mp3`);
+
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`TTS download failed: ${res.status} ${res.statusText}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    fs.writeFileSync(filePath, buf);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(filePath, buffer);
+
+    const resource = createAudioResource(filePath);
+    player.play(resource);
+
+    await entersState(player, AudioPlayerStatus.Playing, 10_000);
+    await new Promise((r) => player.once(AudioPlayerStatus.Idle, r));
+
+    fs.unlinkSync(filePath);
   }
 
-  try {
-    for (let i = seconds; i >= 1; i--) {
-      const ttsUrl = googleTTS.getAudioUrl(String(i), { lang: "en", slow: false });
-      const filePath = path.join(process.cwd(), `count_${i}_${Date.now()}.mp3`);
-
-      await downloadToFile(ttsUrl, filePath);
-
-      const resource = createAudioResource(filePath, { inlineVolume: true });
-      resource.volume.setVolume(1.0);
-
-      player.play(resource);
-
-      await entersState(player, AudioPlayerStatus.Playing, 10_000);
-      await new Promise((resolve) => player.once(AudioPlayerStatus.Idle, resolve));
-
-      // cleanup
-      try { fs.unlinkSync(filePath); } catch {}
-    }
-  } finally {
-    try { connection.destroy(); } catch {}
-  }
+  connection.destroy();
 }
 
 client.login(process.env.DISCORD_TOKEN);
