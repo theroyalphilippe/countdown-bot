@@ -4,39 +4,35 @@ const commands = [
   new SlashCommandBuilder()
     .setName("countdown")
     .setDescription("Start a voice countdown")
-    .addIntegerOption((opt) =>
-      opt
+    .addIntegerOption(option =>
+      option
         .setName("seconds")
-        .setDescription("How many seconds?")
+        .setDescription("Number of seconds")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(60)
-    ),
-].map((c) => c.toJSON());
+    )
+].map(cmd => cmd.toJSON());
 
 const token = process.env.DISCORD_TOKEN;
 const appId = process.env.APPLICATION_ID;
 const guildId = process.env.GUILD_ID;
 
-if (!token || !appId) {
-  console.log("⚠️ Missing DISCORD_TOKEN or APPLICATION_ID in Railway Variables.");
-  process.exit(0); // don’t crash the whole service
+if (!token || !appId || !guildId) {
+  console.error("❌ Missing DISCORD_TOKEN, APPLICATION_ID or GUILD_ID");
+  process.exit(1);
 }
 
 const rest = new REST({ version: "10" }).setToken(token);
 
 (async () => {
   try {
-    if (guildId) {
-      await rest.put(Routes.applicationGuildCommands(appId, guildId), {
-        body: commands,
-      });
-      console.log("✅ Slash commands deployed (GUILD)");
-    } else {
-      await rest.put(Routes.applicationCommands(appId), { body: commands });
-      console.log("✅ Slash commands deployed (GLOBAL)");
-    }
-  } catch (err) {
-    console.error("❌ Failed to deploy slash commands:", err);
+    await rest.put(
+      Routes.applicationGuildCommands(appId, guildId),
+      { body: commands }
+    );
+    console.log("✅ Slash commands deployed (GUILD)");
+  } catch (error) {
+    console.error(error);
   }
 })();
